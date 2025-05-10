@@ -1024,11 +1024,11 @@ async function main() {
         console.log('Subscribed to F1 data streams');
         
         // Stop simulation since we have a real connection
-        stopSimulation();
+        // stopSimulation();
     } catch(e) {
         console.error('Main function error:', e);
-        console.log('Falling back to simulation mode');
-        startSimulation();
+        // console.log('Falling back to simulation mode');
+        // startSimulation();
         console.log('Attempting to reconnect to real F1 data in 30 seconds...');
         setTimeout(main, 30000);
     }
@@ -1042,7 +1042,7 @@ server.listen(PORT, () => {
     console.log(`SSE clients can connect to http://localhost:${PORT}/events`);
     main().catch(error => {
         console.error('Failed to start main process:', error);
-        console.log('Starting in simulation mode');
-        startSimulation();
+        // console.log('Starting in simulation mode');
+        // startSimulation();
     });
 });
