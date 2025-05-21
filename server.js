@@ -5,12 +5,18 @@ const http = require('http');
 const cors = require('cors');
 const fs = require('fs');
 const zlib = require('zlib');
+const authRouter = require('./routes/auth.router');
+const userRouter = require('./routes/user.router');
+const { authenticateToken } = require('./controllers/auth.controller');
+
+const VERSION = process.env.VERSION || 'v1';
 
 // Add at the top of your file with other variable declarations
 // Store recent updates to send to newly connected clients
 const recentUpdates = [];
 // Maximum number of recent updates to store (prevent memory issues)
 const MAX_RECENT_UPDATES = 100;
+
 
 // Create Express app and HTTP server
 const app = express();
@@ -33,7 +39,7 @@ let combinedData = {};
 let simulationActive = false;
 let simulationInterval;
 let initialData = {};
-let path = '2025/2025-04-20_Saudi_Arabian_Grand_Prix/2025-04-20_Race/';
+let path = '2025/2025-05-18_Emilia_Romagna_Grand_Prix/2025-05-16_Practice_2';
 
 
 // Enable CORS
@@ -42,6 +48,14 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+
+
+app.use(`/api/${VERSION}/auth`, authRouter)
+app.use(`/api/${VERSION}/users`, userRouter, authenticateToken)
+
+
+
 
 // Add an endpoint to update the event details
 // app.post('/setEvent', (req, res) => {
@@ -112,6 +126,8 @@ app.get('/negotiate', async (req, res) => {
         res.status(500).json({ error: 'Failed to negotiate connection', message: error.message });
     }
 });
+
+
 
 // SSE endpoint for HTTP clients
 app.get('/events', async (req, res) => {
