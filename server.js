@@ -144,22 +144,21 @@ app.get('/events', async (req, res) => {
     // If you uncomment the fetchInitialData block below, be aware that if fetchInitialData()
     // is slow, it will delay the client. Consider if a smaller, faster initial payload is better,
     // or fetching comprehensive initial data via a separate REST call from the client.
-    /*
-    // Get the latest data directly from the API
-    // const initialData = await fetchInitialData();
     
-    // if (initialData && initialData.R && Object.keys(initialData.R).length > 0) {
-    //     const formattedData = `data: ${JSON.stringify({
-    //         M: [{
-    //             H: 'Streaming',
-    //             M: 'feed',
-    //             A: [initialData]
-    //         }]
-    //     })}\n\n`;
+    // Get the latest data directly from the API
+    
+    if (initialData && initialData.R && Object.keys(initialData.R).length > 0) {
+        const formattedData = `data: ${JSON.stringify({
+            M: [{
+                H: 'Streaming',
+                M: 'feed',
+                A: [initialData]
+            }]
+        })}\n\n`;
         
-    //     res.write(formattedData);
-    // }
-    */
+        res.write(formattedData);
+    }
+    
     
     // Send a heartbeat to keep connection alive
     const heartbeatInterval = setInterval(() => {
@@ -200,16 +199,15 @@ wssClients.on('connection', async (socket, req) => {
     console.log('WebSocket client connected');
     clients.add(socket);
 
-    // Get the latest initial data
-    const initialData = await fetchInitialData();
-
-    // Send initial data to the newly connected client
-    if (initialData && initialData.R && Object.keys(initialData.R).length > 0) {
+    // Send the current initialData to the newly connected client
+    if (initialData && Object.keys(initialData).length > 0) {
         socket.send(JSON.stringify({
             M: [{
                 H: 'Streaming',
                 M: 'feed',
-                A: [initialData]
+                A: [{
+                    R: initialData  // Send the full initialData
+                }]
             }]
         }));
         console.log('Sent initial data to new client');
@@ -303,28 +301,27 @@ async function connectwss(token, cookie) {
                 // Parse the data
                 const parsedData = JSON.parse(data);
 
+                // Store initial data if R object is present
                 if (parsedData.R) {
                     initialData = parsedData.R;
                     console.log('Received initial data:', initialData);
-
-                    if (initialData.SessionInfo && initialData.SessionInfo.Path) {
-                        path = initialData.SessionInfo.Path;
-                        console.log('Path set to:', path);
-                    }
                 }
 
                 // Process CarData.z if present
                 if (parsedData.M && Array.isArray(parsedData.M)) {
                     for (const message of parsedData.M) {
-                        if (message.H === 'Streaming' && message.M === 'feed' &&
-                            message.A && Array.isArray(message.A) && message.A.length >= 2 &&
-                            message.A[1] === 'CarData.z' && typeof message.A[0] === 'string') {
-
-                            console.log('Received compressed CarData.z, processing...');
-                            processCarDataZ(message.A[0]);
-
-                            // Skip broadcasting original compressed data
-                            continue;
+                        if (message.H === 'Streaming' && message.M === 'feed') {
+                            // Update initialData with this feed message
+                            updateInitialData(message);
+                            
+                            if (message.A && Array.isArray(message.A) && message.A.length >= 2 &&
+                                message.A[1] === 'CarData.z' && typeof message.A[0] === 'string') {
+                                console.log('Received compressed CarData.z, processing...');
+                                processCarDataZ(message.A[0]);
+                                
+                                // Skip broadcasting original compressed data
+                                continue;
+                            }
                         }
                     }
                 }
@@ -504,17 +501,68 @@ async function fetchInitialData() {
   }
 }
 
-// Update the initialData endpoint
+// Add this function to update initialData with incoming feed updates
+function updateInitialData(message) {
+    if (!message || !message.H || !message.M || !message.A || message.M !== 'feed') {
+        return; // Not a valid feed message
+    }
+
+    try {
+        // Extract topic name and data from the message
+        const topic = message.A[0];
+        const data = message.A[1];
+        
+        if (!topic || !data) return;
+        
+        // Initialize the topic in initialData if it doesn't exist
+        if (!initialData[topic]) {
+            initialData[topic] = {};
+        }
+        
+        // Handle different update types
+        if (typeof data === 'object' && !Array.isArray(data)) {
+            // For simple updates like WeatherData, directly update the properties
+            if (!Object.keys(data).includes('Lines')) {
+                initialData[topic] = { ...initialData[topic], ...data };
+            } 
+            // For nested updates like TimingData with Lines
+            else if (data.Lines) {
+                if (!initialData[topic].Lines) {
+                    initialData[topic].Lines = {};
+                }
+                
+                // Update each driver's data
+                Object.keys(data.Lines).forEach(driverId => {
+                    if (!initialData[topic].Lines[driverId]) {
+                        initialData[topic].Lines[driverId] = {};
+                    }
+                    
+                    // Deep merge the nested driver data
+                    initialData[topic].Lines[driverId] = deepMerge(
+                        initialData[topic].Lines[driverId],
+                        data.Lines[driverId]
+                    );
+                });
+            }
+        }
+        
+        console.log(`Updated initialData for ${topic}`);
+    } catch (error) {
+        console.error('Error updating initialData:', error);
+    }
+}
+
+// Update the /initialData endpoint to use the current initialData
 app.get('/initialData', async (req, res) => {
   try {
-    const data = await fetchInitialData();
-    res.status(200).json(data);
+    res.status(200).json({
+        R: initialData || {}
+    });
   } catch (error) {
     console.error('Error serving initial data:', error);
     res.status(500).json({ error: 'Failed to fetch initial data' });
   }
 });
-
 
 // Add this to your /status endpoint or create a new /fix endpoint
 app.get('/fix-data', (req, res) => {
